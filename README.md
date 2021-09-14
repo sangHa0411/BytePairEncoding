@@ -1,5 +1,7 @@
 # Embedding
 
-1. BPE
-2. SkipGram
-3. Korean & English
+# Direction
+  1. BPE 
+  2. SkipGram Word2Vec
+  3. Korean & English
+
