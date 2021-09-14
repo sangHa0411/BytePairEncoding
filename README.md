@@ -2,6 +2,6 @@
 
 # Direction
   1. BPE 
-  2. SkipGram Word2Vec
+  2. Glove Embedding
   3. Korean & English
 
