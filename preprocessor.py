@@ -1,11 +1,16 @@
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from tqdm import tqdm
-import torch.optim as optim
-import collections
-import random
+from os import pardir
 import re
+import random
+import collections
+import pandas as pd
+from tqdm import tqdm
+from enum import IntEnum
+
+class Token(IntEnum) :
+    PAD = 0
+    UNK = 1
+    SOS = 2
+    EOS = 3
 
 def kor_preprocess(sen) :
     sen = re.sub('[0-9]+,*[0-9]*', 'NUM ', sen)
@@ -16,66 +21,75 @@ def kor_preprocess(sen) :
 def en_preprocess(sen) :
     sen = sen.lower()
     re.sub('[0-9]+,*[0-9]*', 'NUM ', sen)
-    sen = re.sub('[^a-z!?.,\']' , ' ' , sen)
+    sen = re.sub('[^a-zA-Z!?.,\']' , ' ' , sen)
     sen = re.sub(' {2,}' , ' ' , sen)
     return sen
 
 class Preprocessor :
-    def __init__(self, text, tokenize, preprocess) :
-        self.data = [tokenize(preprocess(sen)) for sen in tqdm(text)]
+    def __init__(self, text, preprocess, tokenize) :
         self.preprocess = preprocess
         self.tokenize = tokenize
+        self.data = [tokenize(preprocess(sen)) for sen in text]
 
-    def build_dict(self) :
+    # build data for bpe
+    def get_bpe(self, merge_count) :
         counter = collections.Counter()
         for tok_list in self.data :
             counter.update(tok_list)
         counter = dict(counter)
         
         bpe_dict = {}
+        subword_set = set()
         for tok, counts in counter.items() :
-            ch_list = tuple(tok) + ('</w>',)
-            ch_str = ' '.join(ch_list)
+            ch_tuple = tuple(tok) + ('_',)
+            ch_str = ' '.join(ch_tuple)
             bpe_dict[ch_str] = counts
+            subword_set.update(list(ch_tuple))
 
-        return bpe_dict
+        subword_list = list(subword_set)
 
-    def get_stats(self, bpe_dict):
-        pairs = collections.defaultdict(int)
-        for word, count in bpe_dict.items():
-            subword_list = word.split()
-            subword_size = len(subword_list)
-            for i in range(subword_size-1):
-                pairs[subword_list[i], subword_list[i+1]] += count
-        return pairs
-
-    def merge_dict(self, pair, v_in):
-        v_out = {}
-        bigram = re.escape(' '.join(pair))
-        p = re.compile(r'(?<!\S)' + bigram + r'(?!\S)')
-        for word in v_in:
-            w_out = p.sub(''.join(pair), word)
-            v_out[w_out] = v_in[word]
-        return v_out
-    
-    def get_bpe(self, merge_count) :
-        bpe_dict = self.build_dict()
-        bpe_codes = {}
-        
+        bpe_code = {}
         for i in tqdm(range(merge_count)) :
             pairs = self.get_stats(bpe_dict)
+            if len(pairs) == 0 :
+                break
             best = max(pairs, key=pairs.get)
-            bpe_dict = self.merge_dict(best, bpe_dict)
-            bpe_codes[best] = i
-            
-        return bpe_codes , bpe_dict
-       
-class Tokenizer :
-    def __init__(self, bpe_code, tokenize , preprocess) :
-        self.bpe_code = bpe_code
+            bpe_dict = self.merge_vocab(best, bpe_dict)
+            bpe_code[best] = i
+            bigram = ''.join(best)
+            subword_list.append(bigram)
+
+        subword_list = [Token.PAD, Token.UNK, Token.SOS, Token.EOS] + sorted(subword_list, key=len, reverse=True)
+        return bpe_code, subword_list
+
+    # code from paper
+    def get_stats(self, vocab):
+        pairs = collections.defaultdict(int) 
+        for word, freq in vocab.items():
+            symbols = word.split()
+            for i in range(len(symbols)-1):
+                pairs[symbols[i],symbols[i+1]] += freq 
+        return pairs
+
+    # code from paper
+    def merge_vocab(self, pair, v_in):
+        v_out = {}
+        bigram = re.escape(' '.join(pair))
+        p = re.compile(r'(?<!\S)' + bigram + r'(?!\S)') 
+        for word in v_in:
+            w_out = p.sub(''.join(pair), word)
+            v_out[w_out] = v_in[word] 
+        return v_out
+
+class Tokenizer:
+    def __init__(self, bpe_code, preprocess, tokenize) :
+        if isinstance(bpe_code, pd.DataFrame) :
+            self.set_data(bpe_code)
+        else :
+            self.bpe_code = bpe_code
         self.preprocess = preprocess
         self.tokenize_fn = tokenize
-    
+
     def get_pairs(self, word) :
         pairs = set()
         prev_char = word[0]
@@ -84,9 +98,10 @@ class Tokenizer :
             prev_char = char
         return pairs
     
-    def encode_word(self, orig) :
-        word = tuple(orig) + ('</w>',)
-        pairs = self.get_pairs(word)    
+    # code from paper
+    def get_sub(self, orig) :
+        word = tuple(orig) + ('_',)
+        pairs = self.get_pairs(word)  
 
         if not pairs:
             return orig
@@ -120,66 +135,66 @@ class Tokenizer :
                 break
             else:
                 pairs = self.get_pairs(word)
-
-        if word[-1] == '</w>':
-            word = word[:-1]
-        elif word[-1].endswith('</w>'):
-            word = word[:-1] + (word[-1].replace('</w>',''),)
-
+                
         return word
+
+    def set_data(self, bpe_data) :
+        bpe_code = {}
+        data_list = list(bpe_data['data'])
+        count_list = list(bpe_data['count'])
+        for i in range(len(bpe_data)) :
+            tok_list = re.findall('\'[a-zA-Z가-힣!?.,\'_]+\'', data_list[i])
+            tok_tuple = tuple([tok[1:-1] for tok in tok_list])
+            count = count_list[i]
+            bpe_code[tok_tuple] = count
+        self.bpe_code = bpe_code
+
+    def get_data(self) :
+        return self.bpe_code
 
     def tokenize(self, sen) :
         sen = self.preprocess(sen)
         tok_list = self.tokenize_fn(sen)
         subword_list = []
         for tok in tok_list :
-            subwords = self.encode_word(tok)
+            subwords = self.get_sub(tok)
             subword_list += list(subwords)
             
         return subword_list
 
+class Encoder :
+    def __init__(self, subword_list) :
+        if isinstance(subword_list, pd.DataFrame) :
+            self.set_data(subword_list)
+        else :
+            self.sub2idx = self.build_data(subword_list)
 
-class Convertor :
-    def __init__(self, bpe_vocab) :
-        self.bpe_vocab = bpe_vocab
-        self.sub2idx, self.idx2sub = self.build_dict()
-    
-    def build_dict(self) :
-        subword_list = []
-        for tok in self.bpe_vocab.keys() :
-            tok = tok[:-4]
-            subwords = tok.split(' ')
-            subword_list += [sub for sub in subwords if sub != '']
-            
-        random.shuffle(subword_list)
-        subword_list = list(set(subword_list))
-        
-        sub2idx = dict(zip(subword_list, range(1,len(subword_list)+1)))
-        idx2sub = dict(zip(range(1,len(subword_list)+1), subword_list))
-    
-        return sub2idx, idx2sub
+    def build_data(self, subword_list) :
+        idx = 0
+        sub2idx = {}
+        for tok in subword_list :
+            sub2idx[tok] = idx
+            idx += 1
+        return sub2idx
 
-    def set_sub2idx(self, sub2idx) :
-        self.sub2idx = sub2idx
-
-    def set_idx2sub(self, idx2sub) :
-        self.idx2sub = idx2sub
-
-    def encode(self, tok_list) :    
-        idx_list = [self.sub2idx[tok] for tok in tok_list if tok != ' ']
-        return idx_list              
-    
-    def decode(self, idx_list) :
-        tok_list = [self.idx2sub[idx] for idx in idx_list]
-        return tok_list
-        
-    def get_sub2idx(self) :
+    def get_data(self) :
         return self.sub2idx
 
-    def get_idx2sub(self) :
-        return self.idx2sub
-    
-    def get_size(self) :
-        return len(self.sub2idx)+1
+    def set_data(self, data_df) :
+        data_size = len(data_df)
+        tok_list = list(data_df['token'])
+        idx_list = list(data_df['index'])
+        sub2idx = {}
+        for i in range(data_size) :
+            sub2idx[tok_list[i]] = idx_list[i]
+        self.sub2idx = sub2idx
 
-
+    def encode(self, tok_list) :
+        idx_list = [] 
+        for tok in tok_list :
+            if tok in self.sub2idx :
+                idx = self.sub2idx[tok]
+            else :
+                idx = Token.UNK
+            idx_list.append(idx)
+        return idx_list
