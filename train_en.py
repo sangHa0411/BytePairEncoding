@@ -193,6 +193,16 @@ def train(args) :
         scheduler.step()
         print('\nVal Loss : %.3f \n' %val_loss)
 
+    em_weight = (model.con_em.weight + model.tar_em.weight)/2
+    em_weight = em_weight.detach().cpu().numpy()
+    em_weight[0] = 0.0
+
+    b_weight = (model.con_b.weight + model.tar_b.weight)/2
+    b_weight = b_weight.detach().cpu().numpy()
+    b_weight[0] = 0.0
+
+    np.save(os.path.join(args.embedding_dir, 'em_weight.npy'), em_weight)
+    np.save(os.path.join(args.embedding_dir, 'b_weight.npy'), b_weight)
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser()
