@@ -13,16 +13,16 @@ class Token(IntEnum) :
     EOS = 3
 
 def kor_preprocess(sen) :
-    sen = re.sub('[0-9]+,*[0-9]*', 'NUM ', sen)
-    sen = re.sub('[^A-Z가-힣!?.,\']', ' ' , sen)
-    sen = re.sub(' {2,}', ' ', sen)
+    sen = re.sub('[0-9]+,*[0-9]*', 'NUM ', sen) # convert digit to NUM token
+    sen = re.sub('[^A-Z가-힣!?.,\']', ' ' , sen) # filter character except alphabet uppercase, korean characters, punctuation 
+    sen = re.sub(' {2,}', ' ', sen) # merge space 
     return sen
 
 def en_preprocess(sen) :
-    sen = sen.lower()
-    re.sub('[0-9]+,*[0-9]*', 'NUM ', sen)
-    sen = re.sub('[^a-zA-Z!?.,\']' , ' ' , sen)
-    sen = re.sub(' {2,}' , ' ' , sen)
+    sen = sen.lower() # make lower case
+    re.sub('[0-9]+,*[0-9]*', 'NUM ', sen) # convert digit to NUM token 
+    sen = re.sub('[^a-zA-Z!?.,\']' , ' ' , sen) # filter character except alphabet, punctuation
+    sen = re.sub(' {2,}' , ' ' , sen) # merge space
     return sen
 
 class Preprocessor :
@@ -63,6 +63,8 @@ class Preprocessor :
         return bpe_code, subword_list
 
     # code from paper
+    # count frequency of bigram sub word which has to merge
+    # the more bigram sub word appears, the more possible it has meaning
     def get_stats(self, vocab):
         pairs = collections.defaultdict(int) 
         for word, freq in vocab.items():
@@ -72,6 +74,7 @@ class Preprocessor :
         return pairs
 
     # code from paper
+    # merge 2 sub word and make bigram for every tok in dict(v_in)
     def merge_vocab(self, pair, v_in):
         v_out = {}
         bigram = re.escape(' '.join(pair))
@@ -90,6 +93,8 @@ class Tokenizer:
         self.preprocess = preprocess
         self.tokenize_fn = tokenize
 
+    # get sub word bigram from word
+    # word_ -> (w,o), (o,r), (r,d), (d,_) 
     def get_pairs(self, word) :
         pairs = set()
         prev_char = word[0]
@@ -98,43 +103,53 @@ class Tokenizer:
             prev_char = char
         return pairs
     
-    # code from paper
+    # code from wikidocs
     def get_sub(self, orig) :
-        word = tuple(orig) + ('_',)
-        pairs = self.get_pairs(word)  
+        word = tuple(orig) + ('_',) # split word to subword tuple
+        pairs = self.get_pairs(word) # get sub word bigram from character tuple
 
         if not pairs:
             return orig
 
         iteration = 0
+        # for each iteration
         while True:
             iteration += 1
+            # get candidate subword bigram which will be merged
+            # key : sub word bigram tuple
+            # value : index / the less the value, the more frequent subword token
             bigram = min(pairs, key = lambda pair: self.bpe_code.get(pair, float('inf')))
+
             if bigram not in self.bpe_code:
                 break
-            first, second = bigram # first tok, second tok
+            # first subword, second subword
+            first, second = bigram 
             new_word = []
             i = 0
             while i < len(word):
                 try:
+                    # i is smaller than index of first subword in subword tuple
                     j = word.index(first, i)
                     new_word.extend(word[i:j])
-                    i = j
+                    i = j # get first token index
                 except:
+                    # fir tok is not in subword touple which index is larger then i
                     new_word.extend(word[i:])
                     break
-                if word[i] == first and i < len(word)-1 and word[i+1] == second:
-                    new_word.append(first+second)
+                 # meet first subword, second subword in subword tuple
+                if (word[i] == first) and (i < len(word)-1) and (word[i+1] == second):
+                    new_word.append(first+second) # merge 2 subword
                     i += 2
-                else:
+                # add first tok in word list
+                else: 
                     new_word.append(word[i])
                     i += 1
-            new_word = tuple(new_word)
+            new_word = tuple(new_word) # convert list to tuple
             word = new_word
-            if len(word) == 1:
-                break
+            if len(word) == 1: # merage all character
+                break # break loop
             else:
-                pairs = self.get_pairs(word)
+                pairs = self.get_pairs(word) # get sub word bigram from merged character tuple
                 
         return word
 
@@ -153,12 +168,12 @@ class Tokenizer:
         return self.bpe_code
 
     def tokenize(self, sen) :
-        sen = self.preprocess(sen)
-        tok_list = self.tokenize_fn(sen)
+        sen = self.preprocess(sen) # preprocess sen
+        tok_list = self.tokenize_fn(sen) # tokenize sen using nltk or mecab
         subword_list = []
-        for tok in tok_list :
-            subwords = self.get_sub(tok)
-            subword_list += list(subwords)
+        for tok in tok_list : # for each tok
+            subwords = self.get_sub(tok) # get subword list
+            subword_list += list(subwords) # extend subword list
             
         return subword_list
 
