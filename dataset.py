@@ -1,7 +1,7 @@
 import numpy as np
 import random 
 import torch
-from torch.utils.data import Dataset, DataLoader , Subset, random_split
+from torch.utils.data import Dataset, random_split
 
 class NgramDataset :
     def __init__(self, v_size, window_size) :
@@ -12,7 +12,7 @@ class NgramDataset :
         co_occ = np.zeros((self.v_size, self.v_size))
         mid_point = int(self.window_size/2)
 
-        for i in range(idx_data) :
+        for i in range(len(idx_data)) :
             idx_list = idx_data[i]
             idx_len = len(idx_list)
             if idx_len < self.window_size :

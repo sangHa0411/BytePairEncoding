@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 from importlib import import_module
-from konlpy.tag import *
+from nltk.tokenize import word_tokenize
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -55,11 +55,10 @@ def train(args) :
 
     # -- Text Data
     text_data = pd.read_csv(args.data_dir)
-    text_list = list(text_data['원문'])
+    text_list = list(text_data['번역문'])
 
     # -- Tokenize & Encoder
-    mecab = Mecab()
-    kor_processor = Preprocessor(text_list, kor_preprocess, mecab.morphs)
+    en_processor = Preprocessor(text_list, en_preprocess, word_tokenize)
 
     bpe_code_path = os.path.join(args.token_dir, 'bpe_code.csv')
     subword_data_path = os.path.join(args.token_dir, 'subword_data.csv')
@@ -68,33 +67,34 @@ def train(args) :
         print('Load Binary Pair Encoding')
         bpe_code = pd.read_csv(bpe_code_path)
         subword_list = pd.read_csv(subword_data_path)
-        kor_tokenizer = Tokenizer(bpe_code, kor_preprocess, mecab.morphs)
-        kor_encoder = Encoder(subword_list)
+        en_tokenizer = Tokenizer(bpe_code, en_preprocess, word_tokenize)
+        en_encoder = Encoder(subword_list)
     else :
         print('Start Binary Pair Encoding')
-        bpe_code, subword_list = kor_processor.get_bpe(args.merge_count)
-        kor_tokenizer = Tokenizer(bpe_code, kor_preprocess, mecab.morphs)
-        kor_encoder = Encoder(subword_list)
+        bpe_code, subword_list = en_processor.get_bpe(args.merge_count)
+        en_tokenizer = Tokenizer(bpe_code, en_preprocess, word_tokenize)
+        en_encoder = Encoder(subword_list)
 
         print('Save Binary Pair Encoding')
-        bpe_data = kor_tokenizer.get_data() # bpe code data
+        bpe_data = en_tokenizer.get_data() # bpe code data
         bpe_df = pd.DataFrame({'data' : list(bpe_data.keys()) , 'count' : list(bpe_data.values())})
         bpe_df.to_csv(bpe_code_path)
-        subword_data = kor_encoder.get_data() # subword token data
+        subword_data = en_encoder.get_data() # subword token data
         subword_df = pd.DataFrame({'token' : list(subword_data.keys()) , 'index' : list(subword_data.values())})
         subword_df.to_csv(subword_data_path)
 
-    kor_token = kor_encoder.get_data()
-    token_size = len(kor_token)
+    en_token = en_encoder.get_data()
+    token_size = len(en_token)
 
     # -- Encoding & Making Index Data
     idx_data = []
     for sen in text_list :
-        tok_list = kor_tokenizer.tokenize(sen)
-        idx_list = [Token.SOS] + kor_encoder.encode(tok_list) + [Token.EOS]
+        tok_list = en_tokenizer.tokenize(sen)
+        idx_list = [Token.SOS] + en_encoder.encode(tok_list) + [Token.EOS]
         idx_data.append(idx_list)
 
     # -- Dataset
+    print('Making Model Dataset')
     ngram_dset = NgramDataset(token_size, args.window_size)
     con_data, tar_data, occ_data = ngram_dset.get_data(idx_data)
     glove_dset = GloveDataset(con_data, tar_data, occ_data, args.val_ratio)
@@ -193,17 +193,6 @@ def train(args) :
         scheduler.step()
         print('\nVal Loss : %.3f \n' %val_loss)
 
-    em_weight = (model.con_em.weight + model.tar_em.weight)/2
-    em_weight = em_weight.detach().cpu().numpy()
-    em_weight[0] = 0.0
-
-    b_weight = (model.con_b.weight + model.tar_b.weight)/2
-    b_weight = b_weight.detach().cpu().numpy()
-    b_weight[0] = 0.0
-
-    np.save(os.path.join(args.embedding_dir, 'em_weight.npy'), em_weight)
-    np.save(os.path.join(args.embedding_dir, 'b_weight.npy'), b_weight)
-
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser()
@@ -219,10 +208,10 @@ if __name__ == '__main__' :
     parser.add_argument('--val_ratio', type=float, default=0.1, help='ratio for validaton (default: 0.1)')
 
     parser.add_argument('--data_dir', type=str, default='../Data/korean_dialogue_translation.csv', help = 'text data')
-    parser.add_argument('--token_dir', type=str, default='./Token/korean' , help='token data dir path')
-    parser.add_argument('--embedding_dir', type=str, default='./Embedding/korean' , help='embedding dir path')
-    parser.add_argument('--model_dir', type=str, default='./Model/korean' , help='best model dir path')
-    parser.add_argument('--log_dir' , type=str , default='./Log/korean', help = 'log data dir path')
+    parser.add_argument('--token_dir', type=str, default='./Token/english' , help='token data dir path')
+    parser.add_argument('--embedding_dir', type=str, default='./Embedding/english' , help='embedding dir path')
+    parser.add_argument('--model_dir', type=str, default='./Model/english' , help='best model dir path')
+    parser.add_argument('--log_dir' , type=str , default='./Log/english', help = 'log data dir path')
 
     args = parser.parse_args()
 
