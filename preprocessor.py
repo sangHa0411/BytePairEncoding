@@ -41,7 +41,7 @@ def write_data(text_list, text_path, preprocess) :
 
 
 def get_spm(dir_path, text_name, model_name, vocab_size) :
-    text_path = os.path.join(dir_path, text_name + '.txt')
+    text_path = os.path.join(dir_path, text_name)
     model_path = os.path.join(dir_path, model_name + '.model')
 
     if os.path.exists(model_path) :

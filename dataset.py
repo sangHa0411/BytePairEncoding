@@ -10,7 +10,7 @@ class NgramDataset :
 
     def get_data(self, idx_data) :
         co_occ = np.zeros((self.v_size, self.v_size))
-        mid_point = int(self.window_size/2)
+        mid_point = int(self.w_size/2)
 
         ngram_data = []
         for i in range(len(idx_data)) :
@@ -25,7 +25,7 @@ class NgramDataset :
 
         ngram_array = np.array(ngram_data)
         cen_array = ngram_array[:, mid_point]
-        con_array = np.hstack([ngram_array[:, mid_point-1], ngram_array[:,mid_point+1:]])
+        con_array = np.hstack([ngram_array[:, :mid_point], ngram_array[:,mid_point+1:]])
 
         return cen_array, con_array
     

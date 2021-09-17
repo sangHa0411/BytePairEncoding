@@ -5,8 +5,6 @@ import argparse
 import multiprocessing
 import numpy as np
 import pandas as pd
-from tqdm import tqdm
-from importlib import import_module
 from konlpy.tag import *
 import torch
 import torch.nn as nn
@@ -14,17 +12,21 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import ExponentialLR
 from torch.utils.data import Dataset, DataLoader , Subset, random_split
-from torch.utils.tensorboard import SummaryWriter
 
 from dataset import *
 from model import *
 from preprocessor import *
 
-def progressLearning(value, endvalue, loss, bar_length=50):
+def progressLearning(value, endvalue, loss, acc, bar_length=50):
     percent = float(value + 1) / endvalue
     arrow = '-' * int(round(percent * bar_length)-1) + '>'
     spaces = ' ' * (bar_length - len(arrow))
-    sys.stdout.write("\rPercent: [{0}] {1}/{2} \t Loss : {3:.3f}".format(arrow + spaces, value+1, endvalue, loss))
+    sys.stdout.write("\rPercent: [{0}] {1}/{2} \t Loss : {3:.3f}, Acc : {4:.3f}".format(arrow + spaces, 
+        value+1, 
+        endvalue, 
+        loss, 
+        acc)
+    )
     sys.stdout.flush()
 
 def seed_everything(seed):
@@ -35,15 +37,6 @@ def seed_everything(seed):
     torch.backends.cudnn.benchmark = False
     np.random.seed(seed)
     random.seed(seed)
-
-def weight_fn(occ_output, device) :
-    x_max = torch.tensor(100.0, dtype = torch.float32, device = device)
-    occ_weight = torch.where(occ_output > x_max, 
-        (occ_output/x_max), 
-        torch.tensor(1.0, dtype=torch.float32, device = device)
-    )
-    occ_weight = torch.pow(occ_weight, (3/4))
-    return occ_weight
 
 def train(args) :
     # -- Seed
@@ -58,47 +51,21 @@ def train(args) :
     text_list = list(text_data['원문'])
 
     # -- Tokenize & Encoder
-    mecab = Mecab()
-    kor_processor = Preprocessor(text_list, kor_preprocess, mecab.morphs)
+    kor_text_path = os.path.join(args.token_dir, 'korean.txt')
+    if os.path.exists(kor_text_path) == False :
+        write_data(text_list, kor_text_path, preprocess_kor)
+    kor_spm = get_spm(args.token_dir, 'korean.txt', 'kor_spm', args.token_size)
 
-    bpe_code_path = os.path.join(args.token_dir, 'bpe_code.csv')
-    subword_data_path = os.path.join(args.token_dir, 'subword_data.csv')
-
-    if os.path.exists(bpe_code_path) and os.path.exists(subword_data_path) :
-        print('Load Binary Pair Encoding')
-        bpe_code = pd.read_csv(bpe_code_path)
-        subword_list = pd.read_csv(subword_data_path)
-        kor_tokenizer = Tokenizer(bpe_code, kor_preprocess, mecab.morphs)
-        kor_encoder = Encoder(subword_list)
-    else :
-        print('Start Binary Pair Encoding')
-        bpe_code, subword_list = kor_processor.get_bpe(args.merge_count)
-        kor_tokenizer = Tokenizer(bpe_code, kor_preprocess, mecab.morphs)
-        kor_encoder = Encoder(subword_list)
-
-        print('Save Binary Pair Encoding')
-        bpe_data = kor_tokenizer.get_data() # bpe code data
-        bpe_df = pd.DataFrame({'data' : list(bpe_data.keys()) , 'count' : list(bpe_data.values())})
-        bpe_df.to_csv(bpe_code_path)
-        subword_data = kor_encoder.get_data() # subword token data
-        subword_df = pd.DataFrame({'token' : list(subword_data.keys()) , 'index' : list(subword_data.values())})
-        subword_df.to_csv(subword_data_path)
-
-    kor_token = kor_encoder.get_data()
-    token_size = len(kor_token)
-
-    # -- Encoding & Making Index Data
     idx_data = []
     for sen in text_list :
-        tok_list = kor_tokenizer.tokenize(sen)
-        idx_list = [Token.SOS] + kor_encoder.encode(tok_list) + [Token.EOS]
+        idx_list = kor_spm.encode_as_ids(sen)
         idx_data.append(idx_list)
 
     # -- Dataset
-    ngram_dset = NgramDataset(token_size, args.window_size)
-    con_data, tar_data, occ_data = ngram_dset.get_data(idx_data)
-    glove_dset = GloveDataset(con_data, tar_data, occ_data, args.val_ratio)
-    train_dset, val_dset = glove_dset.split()
+    ngram_dset = NgramDataset(args.token_size, args.window_size)
+    cen_data, con_data = ngram_dset.get_data(idx_data)
+    skipgram_dset = SkipGramDataset(cen_data, con_data, args.val_ratio)
+    train_dset, val_dset = skipgram_dset.split()
 
     # -- DataLoader
     train_loader = DataLoader(train_dset,
@@ -111,78 +78,68 @@ def train(args) :
         shuffle=False,
         batch_size=args.val_batch_size
     )
-
+    
     # -- Model
-    model = Glove(args.embedding_size, token_size).to(device)
+    model = SkipGram(args.embedding_size, args.token_size, args.window_size).to(device)
 
     # -- Optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # -- Scheduler
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.8)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
     
     # -- Loss
-    criterion = nn.MSELoss()
-
-    # -- Logging
-    writer = SummaryWriter(args.log_dir)
+    criterion = nn.CrossEntropyLoss().to(device)
 
     # -- Training
     min_loss = np.inf
     stop_count = 0
-    log_count = 0
     for epoch in range(args.epochs) :
         idx = 0
         model.train()
         print('Epoch : %d/%d \t Learning Rate : %e' %(epoch, args.epochs, optimizer.param_groups[0]["lr"]))
-        for data in train_loader :
-            con_data = data['con'].long().to(device)
-            tar_data = data['tar'].long().to(device)
+        for cen_in, con_label in train_loader :
+            cen_in = cen_in.long().to(device)
+            con_label = con_label.long().to(device)
+            con_label = con_label.view([-1,])
 
-            occ_data = data['occ'].float().to(device)
-            occ_weight = weight_fn(occ_data, device)
-            occ_log = torch.log(occ_data)
-            occ_label = torch.mul(occ_weight, occ_log)
+            con_output = model(cen_in)
+            con_output = con_output.view([-1, args.token_size])
 
-            occ_output = model(con_data, tar_data)
-
-            loss = criterion(occ_output, occ_label)
+            loss = criterion(con_output, con_label)
+            acc = (torch.argmax(con_output,-1) == con_label).float().mean()
             loss.backward()
             optimizer.step()
         
-            progressLearning(idx, len(train_loader), loss.item())
-
-            if (idx + 1) % 10 == 0 :
-                writer.add_scalar('train/loss', loss.item(), log_count)
-                log_count += 1
+            progressLearning(idx, len(train_loader), loss.item(), acc.item())
             idx += 1
 
         with torch.no_grad() :
             model.eval()
             val_loss = 0.0
-            for data in val_loader :
-                con_data = data['con'].long().to(device)
-                tar_data = data['tar'].long().to(device)
+            val_acc = 0.0
+            for cen_in, con_label in val_loader :
+                cen_in = cen_in.long().to(device)
+                con_label = con_label.long().to(device)
+                con_label = con_label.view([-1,])
 
-                occ_data = data['occ'].float().to(device)
-                occ_weight = weight_fn(occ_data, device)
-                occ_log = torch.log(occ_data)
-                occ_label = torch.mul(occ_weight, occ_log)
-                
-                occ_output = model(con_data, tar_data)
+                con_output = model(cen_in)
+                con_output = con_output.view([-1, args.token_size])
 
-                loss = criterion(occ_output, occ_label)
+                loss = criterion(con_output, con_label)
+                acc = (torch.argmax(con_output,-1) == con_label).float().mean()
                 val_loss += loss
+                val_acc += acc
 
             val_loss /= len(val_loader)
-        writer.add_scalar('val/loss', val_loss.item(), epoch)
+            val_acc /= len(val_loader)
 
         if val_loss < min_loss :
             min_loss = val_loss
             torch.save({'epoch' : (epoch) ,  
                 'model_state_dict' : model.state_dict() , 
                 'loss' : val_loss.item()}, 
-            os.path.join(args.model_dir,'checkpoint_glove.pt'))
+            os.path.join(args.model_dir,'kor_skipgram.pt'))
             stop_count = 0
         else :
             stop_count += 1
@@ -191,8 +148,11 @@ def train(args) :
                 break
 
         scheduler.step()
-        print('\nVal Loss : %.3f \n' %val_loss)
+        print('\nVal Loss : %.3f , Val Acc : %.3f\n' %(val_loss, val_acc))
 
+
+    """
+    
     em_weight = (model.con_em.weight + model.tar_em.weight)/2
     em_weight = em_weight.detach().cpu().numpy()
     em_weight[0] = 0.0
@@ -204,25 +164,25 @@ def train(args) :
     np.save(os.path.join(args.embedding_dir, 'em_weight.npy'), em_weight)
     np.save(os.path.join(args.embedding_dir, 'b_weight.npy'), b_weight)
 
-
+    """
+  
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=777, help='random seed (default: 777)')
-    parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 20)')
-    parser.add_argument('--merge_count', type=int, default=6000, help='number of bpe merge (default: 6000)')
+    parser.add_argument('--epochs', type=int, default=30, help='number of epochs to train (default: 30)')
+    parser.add_argument('--token_size', type=int, default=7000, help='number of bpe merge (default: 7000)')
     parser.add_argument('--embedding_size', type=int, default=512, help='embedding size of token (default: 512)')
-    parser.add_argument('--window_size', type=int, default=13, help='window size (default: 13)')
-    parser.add_argument('--batch_size', type=int, default=1024, help='input batch size for training (default: 1024)')
-    parser.add_argument('--val_batch_size', type=int, default=1024, help='input batch size for validing (default: 1024)')
-    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 2e-4)')    
+    parser.add_argument('--window_size', type=int, default=11, help='window size (default: 11)')
+    parser.add_argument('--batch_size', type=int, default=512, help='input batch size for training (default: 512)')
+    parser.add_argument('--val_batch_size', type=int, default=512, help='input batch size for validing (default: 512)')
+    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-4)')    
     parser.add_argument('--val_ratio', type=float, default=0.1, help='ratio for validaton (default: 0.1)')
 
     parser.add_argument('--data_dir', type=str, default='../Data/korean_dialogue_translation.csv', help = 'text data')
-    parser.add_argument('--token_dir', type=str, default='./Token/korean' , help='token data dir path')
-    parser.add_argument('--embedding_dir', type=str, default='./Embedding/korean' , help='embedding dir path')
-    parser.add_argument('--model_dir', type=str, default='./Model/korean' , help='best model dir path')
-    parser.add_argument('--log_dir' , type=str , default='./Log/korean', help = 'log data dir path')
+    parser.add_argument('--token_dir', type=str, default='./Token' , help='token data dir path')
+    parser.add_argument('--embedding_dir', type=str, default='./Embedding' , help='embedding dir path')
+    parser.add_argument('--model_dir', type=str, default='./Model' , help='best model dir path')
 
     args = parser.parse_args()
 
