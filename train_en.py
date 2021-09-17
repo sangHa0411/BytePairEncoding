@@ -57,9 +57,9 @@ def train(args) :
 
     idx_data = []
     for sen in text_list :
+        sen = preprocess_en(sen)
         idx_list = en_spm.encode_as_ids(sen)
         idx_data.append(idx_list)
-
 
     # -- Dataset
     ngram_dset = NgramDataset(args.token_size, args.window_size)
