@@ -61,6 +61,7 @@ def train(args) :
         idx_list = kor_spm.encode_as_ids(sen)
         idx_data.append(idx_list)
 
+
     # -- Dataset
     ngram_dset = NgramDataset(args.token_size, args.window_size)
     cen_data, con_data = ngram_dset.get_data(idx_data)
@@ -86,7 +87,7 @@ def train(args) :
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # -- Scheduler
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.7)
     
     # -- Loss
     criterion = nn.CrossEntropyLoss().to(device)
@@ -151,31 +152,25 @@ def train(args) :
         print('\nVal Loss : %.3f , Val Acc : %.3f\n' %(val_loss, val_acc))
 
 
-    """
-    
-    em_weight = (model.con_em.weight + model.tar_em.weight)/2
-    em_weight = em_weight.detach().cpu().numpy()
-    em_weight[0] = 0.0
+    kor_weight = model.get_weight()
+    kor_weight = kor_weight.detach().cpu().numpy()
 
-    b_weight = (model.con_b.weight + model.tar_b.weight)/2
-    b_weight = b_weight.detach().cpu().numpy()
-    b_weight[0] = 0.0
+    kor_bias = model.get_bias()
+    kor_bias = kor_bias.detach().cpu().numpy()
 
-    np.save(os.path.join(args.embedding_dir, 'em_weight.npy'), em_weight)
-    np.save(os.path.join(args.embedding_dir, 'b_weight.npy'), b_weight)
+    np.save(os.path.join(args.embedding_dir, 'kor_weight.npy'), kor_weight)
+    np.save(os.path.join(args.embedding_dir, 'kor_bias.npy'), kor_bias)
 
-    """
-  
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=777, help='random seed (default: 777)')
-    parser.add_argument('--epochs', type=int, default=30, help='number of epochs to train (default: 30)')
+    parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 30)')
     parser.add_argument('--token_size', type=int, default=7000, help='number of bpe merge (default: 7000)')
     parser.add_argument('--embedding_size', type=int, default=512, help='embedding size of token (default: 512)')
     parser.add_argument('--window_size', type=int, default=11, help='window size (default: 11)')
-    parser.add_argument('--batch_size', type=int, default=512, help='input batch size for training (default: 512)')
-    parser.add_argument('--val_batch_size', type=int, default=512, help='input batch size for validing (default: 512)')
+    parser.add_argument('--batch_size', type=int, default=1024, help='input batch size for training (default: 1024)')
+    parser.add_argument('--val_batch_size', type=int, default=1024, help='input batch size for validing (default: 1024)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-4)')    
     parser.add_argument('--val_ratio', type=float, default=0.1, help='ratio for validaton (default: 0.1)')
 
