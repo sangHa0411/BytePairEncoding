@@ -4,57 +4,47 @@ import torch
 from torch.utils.data import Dataset, random_split
 
 class NgramDataset :
-    def __init__(self, v_size, window_size) :
+    def __init__(self, v_size, w_size) :
         self.v_size = v_size
-        self.window_size = window_size
+        self.w_size = w_size
 
     def get_data(self, idx_data) :
         co_occ = np.zeros((self.v_size, self.v_size))
         mid_point = int(self.window_size/2)
 
+        ngram_data = []
         for i in range(len(idx_data)) :
             idx_list = idx_data[i]
-            idx_len = len(idx_list)
-            if idx_len < self.window_size :
+            if len(idx_data) < self.w_size :
                 continue
+            for j in range(len(idx_list)-self.w_size) :
+                sub_list = idx_list[j:j+self.w_size]
+                ngram_data.append(sub_list)
 
-            for j in range(len(idx_list)-self.window_size) :
-                sub_list = idx_list[j:j+self.window_size]
-                center = sub_list[mid_point]
-                context = sub_list[:mid_point] + sub_list[mid_point+1:] 
-                co_occ[center][context] += 1
+        random.shuffle(ngram_data)
 
-        con_data = []
-        tar_data = []
-        occ_data = []
+        ngram_array = np.array(ngram_data)
+        cen_array = ngram_array[:, mid_point]
+        con_array = np.hstack([ngram_array[:, mid_point-1], ngram_array[:,mid_point+1:]])
 
-        for i in range(self.v_size) :
-            for j in range(self.v_size) :
-                if co_occ[i,j] > 0 :
-                    con_data.append(i)
-                    tar_data.append(j)
-                    occ_data.append(co_occ[i,j])
-
-        return con_data, tar_data, occ_data
+        return cen_array, con_array
     
-class GloveDataset(Dataset) :
-    def __init__(self, con_data, tar_data, occ_data, val_ratio=0.1) :
-        super(GloveDataset , self).__init__()
-        assert (len(con_data) == len(tar_data)) and (len(con_data) == len(occ_data))
-        self.con_data = con_data
-        self.tar_data = tar_data
-        self.occ_data = occ_data
+class SkipGramDataset(Dataset) :
+    def __init__(self, cen_array, con_array, val_ratio=0.1) :
+        super(SkipGramDataset , self).__init__()
+        assert len(cen_array) == len(con_array)
+        self.cen_array = cen_array
+        self.con_array = con_array
         self.val_ratio = val_ratio
 
     def __len__(self) :
-        return len(self.con_data)
+        return len(self.con_array)
 
     def __getitem__(self , idx) :
-        con_idx = self.con_data[idx]
-        tar_idx = self.tar_data[idx]
-        occ_idx = self.occ_data[idx]
+        cen_idx = self.cen_array[idx]
+        con_idx = self.con_array[idx]
 
-        return {'con' : con_idx, 'tar' : tar_idx, 'occ' : occ_idx}
+        return cen_idx, con_idx
 
     def split(self) :
         n_val = int(len(self) * self.val_ratio)
