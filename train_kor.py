@@ -155,9 +155,11 @@ def train(args) :
 
     kor_weight = model.get_weight()
     kor_weight = kor_weight.detach().cpu().numpy()
+    kor_weight[0] = 0.0
 
     kor_bias = model.get_bias()
     kor_bias = kor_bias.detach().cpu().numpy()
+    kor_bias[0] = 0.0
 
     np.save(os.path.join(args.embedding_dir, 'kor_weight.npy'), kor_weight)
     np.save(os.path.join(args.embedding_dir, 'kor_bias.npy'), kor_bias)

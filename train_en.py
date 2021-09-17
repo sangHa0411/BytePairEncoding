@@ -153,9 +153,11 @@ def train(args) :
 
     en_weight = model.get_weight()
     en_weight = en_weight.detach().cpu().numpy()
+    en_weight[0] = 0.0
 
     en_bias = model.get_bias()
     en_bias = en_bias.detach().cpu().numpy()
+    en_bias[0] = 0.0
 
     np.save(os.path.join(args.embedding_dir, 'en_weight.npy'), en_weight)
     np.save(os.path.join(args.embedding_dir, 'en_bias.npy'), en_bias)
