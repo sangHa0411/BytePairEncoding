@@ -21,7 +21,6 @@ spm_templates= '--input={} \
 --character_coverage={} \
 --model_type={}'
 
-
 def preprocess_en(sen) :
     sen = sen.lower()
     sen = re.sub('[^a-z0-9 \',.!?]' , '', sen)

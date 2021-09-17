@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from importlib import import_module
 import torch.optim as optim
 from torch.optim.lr_scheduler import ExponentialLR
-from torch.utils.data import Dataset, DataLoader , Subset, random_split
+from torch.utils.data import Dataset, DataLoader 
 
 from dataset import *
 from model import *
@@ -37,16 +37,6 @@ def seed_everything(seed):
     torch.backends.cudnn.benchmark = False
     np.random.seed(seed)
     random.seed(seed)
-
-
-def select_input(cen_data, con_data, model_type) :
-    if model_type == 'CBOW' :
-        in_data = con_data
-        out_data = cen_data
-    else :
-        in_data = cen_data
-        out_data = con_data
-    return in_data, out_data
 
 def train(args) :
     # -- Seed
@@ -106,7 +96,7 @@ def train(args) :
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # -- Scheduler
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.85)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.8)
     
     # -- Loss
     criterion = nn.CrossEntropyLoss().to(device)
@@ -125,7 +115,7 @@ def train(args) :
             if args.model == 'CBOW' :
                 in_data = context
                 out_label = center
-            else :
+            else : # model == 'SkipGram'
                 in_data = center
                 out_label = context.view([-1,])
             
@@ -174,7 +164,7 @@ def train(args) :
                 'model_state_dict' : model.state_dict() , 
                 'loss' : val_loss.item(), 
                 'acc' : val_acc.item()},
-            os.path.join(args.model_dir,'en_' + args.model.lower() + '.pt'))
+            os.path.join(args.model_dir,'en_'+args.model.lower()+'.pt'))
             stop_count = 0
         else :
             stop_count += 1
