@@ -58,6 +58,7 @@ def train(args) :
 
     idx_data = []
     for sen in text_list :
+        sen = preprocess_kor(sen)
         idx_list = kor_spm.encode_as_ids(sen)
         idx_data.append(idx_list)
 
