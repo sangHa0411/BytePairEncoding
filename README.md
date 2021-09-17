@@ -1,7 +1,7 @@
 # Embedding
+  1. SkipGram
 
 # Direction
-  1. BPE 
-  2. Glove Embedding
-  3. Korean & English
+  1. SentencePiece
+  2. Korean & English
 
