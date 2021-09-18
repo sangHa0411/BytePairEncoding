@@ -62,119 +62,74 @@ def train(args) :
         idx_list = kor_spm.encode_as_ids(sen)
         idx_data.append(idx_list)
 
-
     # -- Dataset
     ngram_dset = NgramDataset(args.token_size, args.window_size)
     cen_data, con_data = ngram_dset.get_data(idx_data)
-    Word2Vec_dset = Word2VecDataset(cen_data, con_data, args.val_ratio)
-    train_dset, val_dset = Word2Vec_dset.split()
+    word2vec_dset = Word2VecDataset(cen_data, con_data)
 
     # -- DataLoader
-    train_loader = DataLoader(train_dset,
+    data_loader = DataLoader(word2vec_dset,
         num_workers=multiprocessing.cpu_count()//2,
         shuffle=True,
         batch_size=args.batch_size
     )
-    val_loader = DataLoader(val_dset,
-        num_workers=multiprocessing.cpu_count()//2,
-        shuffle=False,
-        batch_size=args.val_batch_size
-    )
     
     # -- Model
     model_module = getattr(import_module('model') , args.model) 
-    if args.model == 'CBOW' :
-        model = model_module(args.embedding_size, args.token_size).to(device)
-    elif args.model == 'SkipGram' :
-        model = model_module(args.embedding_size, 
-            args.token_size,
-            args.window_size
-        ).to(device)
-    else :
-        raise NameError
+    model = model_module(args.embedding_size, args.token_size).to(device)
 
     # -- Optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
     # -- Scheduler
-    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.8)
+    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.8)
     
     # -- Loss
     criterion = nn.CrossEntropyLoss().to(device)
 
     # -- Training
-    min_loss = np.inf
-    stop_count = 0
     for epoch in range(args.epochs) :
         idx = 0
+        loss_train = 0.0
+        acc_train = 0.0
         model.train()
         print('Epoch : %d/%d \t Learning Rate : %e' %(epoch, args.epochs, optimizer.param_groups[0]["lr"]))
-        for center, context in train_loader :
+        for center, context in data_loader :
             center = center.long().to(device)
             context = context.long().to(device)
 
             if args.model == 'CBOW' :
                 in_data = context
                 out_label = center
-            else : # model == 'SkipGram'
-                in_data = center
+            else : 
+                in_data = center.unsqueeze(1).repeat(1,args.window_size-1)
+                in_data = in_data.view([-1,])
                 out_label = context.view([-1,])
             
             out_data = model(in_data)
-            if args.model == 'SkipGram' :
-                out_data = out_data.view([-1,args.token_size])
 
             loss = criterion(out_data, out_label)
             acc = (torch.argmax(out_data,-1) == out_label).float().mean()
             loss.backward()
             optimizer.step()
+
+            loss_train += loss
+            acc_train += acc
         
-            progressLearning(idx, len(train_loader), loss.item(), acc.item())
+            progressLearning(idx, len(data_loader), loss.item(), acc.item())
             idx += 1
 
-        with torch.no_grad() :
-            model.eval()
-            val_loss = 0.0
-            val_acc = 0.0
-            for center, context in val_loader :
-                center = center.long().to(device)
-                context = context.long().to(device)
+        loss_train /= len(data_loader)
+        acc_train /= len(data_loader)
 
-                if args.model == 'CBOW' :
-                    in_data = context
-                    out_label = center
-                else :
-                    in_data = center
-                    out_label = context.view([-1,])
-            
-                out_data = model(in_data)
-                if args.model == 'SkipGram' :
-                    out_data = out_data.view([-1,args.token_size])
-
-                loss = criterion(out_data, out_label)
-                acc = (torch.argmax(out_data,-1) == out_label).float().mean()
-                val_loss += loss
-                val_acc += acc
-
-            val_loss /= len(val_loader)
-            val_acc /= len(val_loader)
-
-        if val_loss < min_loss :
-            min_loss = val_loss
-            torch.save({'epoch' : (epoch) ,  
-                'model_state_dict' : model.state_dict() , 
-                'loss' : val_loss.item()}, 
-            os.path.join(args.model_dir,'kor_'+args.model.lower()+'.pt'))
-            stop_count = 0
-        else :
-            stop_count += 1
-            if stop_count >= 5 :
-                print('\nTraining Early Stopped') 
-                break
-
+        torch.save({'epoch' : (epoch) ,  
+            'model_state_dict' : model.state_dict() , 
+            'loss' : loss_train.item(), 
+            'acc' : acc_train.item()},
+        os.path.join(args.model_dir,'en_'+args.model.lower()+'.pt'))
+   
         scheduler.step()
-        print('\nVal Loss : %.3f , Val Acc : %.3f\n' %(val_loss, val_acc))
-
+        print('\nMean Loss : %.3f , Mean Acc : %.3f\n' %(loss_train, acc_train))
 
     kor_weight = model.get_weight()
     kor_weight = kor_weight.detach().cpu().numpy()
@@ -191,8 +146,8 @@ if __name__ == '__main__' :
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=777, help='random seed (default: 777)')
-    parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 30)')
-    parser.add_argument('--token_size', type=int, default=9000, help='number of bpe merge (default: 9000)')
+    parser.add_argument('--epochs', type=int, default=60, help='number of epochs to train (default: 35)')
+    parser.add_argument('--token_size', type=int, default=7000, help='number of bpe merge (default: 7000)')
     parser.add_argument('--model', type=str, default='CBOW', help='model of embedding (default: CBOW)')
     parser.add_argument('--embedding_size', type=int, default=512, help='embedding size of token (default: 512)')
     parser.add_argument('--window_size', type=int, default=11, help='window size (default: 11)')
