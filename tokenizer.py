@@ -1,7 +1,9 @@
 import os
 import re
+import json
+from dataset import Token
+from tqdm import tqdm
 import sentencepiece as spm
-from enum import IntEnum
 
 spm_templates= '--input={} \
 --pad_id={} \
@@ -23,8 +25,27 @@ def get_data(json_data) :
     doc_data = json_data['document']
     for doc in doc_data :
         data_list = doc['utterance']
-        dialogue = [data['form'] for data in data_list if len(data['form']) >= 10]
+        dialogue = [data['form'] for data in data_list if len(data['form']) >= 5]
         text_data.extend(dialogue)
+    return text_data
+
+def load_data(dir_path) :
+    data_list = os.listdir(dir_path)
+    json_data = []
+    for data in data_list :
+        if data.endswith('.json') :
+            file_path = os.path.join(dir_path, data)
+            
+            try :
+                json_file = read_data(file_path)
+                json_data.append(json_file)
+            except UnicodeDecodeError :
+                continue
+
+    text_data = []
+    for json_file in tqdm(json_data) :
+        text_list = get_data(json_file)
+        text_data.extend(text_list)
     return text_data
  
 def preprocess_kor(sen) :
