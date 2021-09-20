@@ -25,7 +25,11 @@
   4. Embedding Size : 512
 
 ## 3. Training
-    1. Optimizer : Adam
-    2. Learning Rate : 1e-4
-    3. Batch Size : 1024
-   
+  1. Optimizer : Adam
+  2. Learning Rate : 1e-4
+  3. Batch Size : 1024
+  
+## 4. Source
+  1. 모두의 말뭉치 : https://corpus.korean.go.kr
+  2. 일상 대화 말뭉치
+
