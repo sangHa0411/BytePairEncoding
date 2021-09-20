@@ -1,6 +1,13 @@
 import numpy as np
 import torch
-from torch.utils.data import Dataset, random_split
+from torch.utils.data import Dataset
+from enum import IntEnum
+
+class Token(IntEnum) :
+    PAD = 0
+    UNK = 1
+    SOS = 2
+    EOS = 3
 
 class NgramDataset :
     def __init__(self, v_size, w_size) :
@@ -40,4 +47,3 @@ class Word2VecDataset(Dataset) :
         con_idx = self.con_array[idx]
 
         return cen_idx, con_idx
-
