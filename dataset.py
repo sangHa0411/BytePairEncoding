@@ -1,5 +1,4 @@
 import numpy as np
-import random 
 import torch
 from torch.utils.data import Dataset, random_split
 
@@ -21,21 +20,18 @@ class NgramDataset :
                 sub_list = idx_list[j:j+self.w_size]
                 ngram_data.append(sub_list)
 
-        random.shuffle(ngram_data)
-
         ngram_array = np.array(ngram_data)
         cen_array = ngram_array[:, mid_point]
         con_array = np.hstack([ngram_array[:, :mid_point], ngram_array[:,mid_point+1:]])
 
         return cen_array, con_array
     
-class SkipGramDataset(Dataset) :
-    def __init__(self, cen_array, con_array, val_ratio=0.1) :
-        super(SkipGramDataset , self).__init__()
+class Word2VecDataset(Dataset) :
+    def __init__(self, cen_array, con_array) :
+        super(Word2VecDataset , self).__init__()
         assert len(cen_array) == len(con_array)
         self.cen_array = cen_array
         self.con_array = con_array
-        self.val_ratio = val_ratio
 
     def __len__(self) :
         return len(self.con_array)
@@ -46,9 +42,3 @@ class SkipGramDataset(Dataset) :
 
         return cen_idx, con_idx
 
-    def split(self) :
-        n_val = int(len(self) * self.val_ratio)
-        n_train = len(self) - n_val
-        train_set, val_set = random_split(self, [n_train, n_val])
-        
-        return train_set, val_set
