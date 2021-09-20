@@ -4,14 +4,14 @@ import random
 import argparse
 import multiprocessing
 import numpy as np
-import pandas as pd
+from tqdm import tqdm
 from importlib import import_module
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.optim.lr_scheduler import ExponentialLR
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 
 from dataset import *
 from model import *
@@ -47,19 +47,21 @@ def train(args) :
     device = torch.device("cuda" if use_cuda else "cpu")
 
     # -- Text Data
-    text_data = pd.read_csv(args.data_dir)
-    text_list = list(text_data['원문'])
+    print('Load Data')
+    text_data = load_data(args.data_dir)
 
     # -- Tokenize & Encoder
-    kor_text_path = os.path.join(args.token_dir, 'korean.txt')
+    kor_text_path = os.path.join(args.token_dir, 'dialogue.txt')
     if os.path.exists(kor_text_path) == False :
-        write_data(text_list, kor_text_path, preprocess_kor)
-    kor_spm = get_spm(args.token_dir, 'korean.txt', 'kor_spm', args.token_size)
+        write_data(text_data, kor_text_path, preprocess_kor)
+        train_spm(args.token_dir,  'dialogue.txt', 'kor_tokenizer' , args.token_size)
+    kor_tokenizer = get_spm(args.token_dir, 'kor_tokenizer.model')
 
+    print('Encode Data')
     idx_data = []
-    for sen in text_list :
+    for sen in tqdm(text_data) :
         sen = preprocess_kor(sen)
-        idx_list = kor_spm.encode_as_ids(sen)
+        idx_list = kor_tokenizer.encode_as_ids(sen)
         idx_data.append(idx_list)
 
     # -- Dataset
@@ -81,17 +83,21 @@ def train(args) :
     # -- Optimizer
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
 
-    # -- Scheduler
-    scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=3, gamma=0.8)
-    
+    # -- Scheudler
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.9)
+
+    # -- Logging
+    writer = SummaryWriter(args.log_dir)
+
     # -- Loss
     criterion = nn.CrossEntropyLoss().to(device)
 
     # -- Training
+    log_count = 0
     for epoch in range(args.epochs) :
         idx = 0
-        loss_train = 0.0
-        acc_train = 0.0
+        mean_loss = 0.0
+        mean_acc = 0.0
         model.train()
         print('Epoch : %d/%d \t Learning Rate : %e' %(epoch, args.epochs, optimizer.param_groups[0]["lr"]))
         for center, context in data_loader :
@@ -113,37 +119,47 @@ def train(args) :
             loss.backward()
             optimizer.step()
 
-            loss_train += loss
-            acc_train += acc
-        
+            mean_loss += loss
+            mean_acc += acc
+
             progressLearning(idx, len(data_loader), loss.item(), acc.item())
+            if (idx + 1) % 10 == 0 :
+                writer.add_scalar('train/loss', loss.item(), log_count)
+                writer.add_scalar('train/acc', acc.item(), log_count)
+                log_count += 1
             idx += 1
 
-        loss_train /= len(data_loader)
-        acc_train /= len(data_loader)
+        mean_loss /= len(data_loader)
+        mean_acc /= len(data_loader)
 
         torch.save({'epoch' : (epoch) ,  
             'model_state_dict' : model.state_dict() , 
-            'loss' : loss_train.item(), 
-            'acc' : acc_train.item()},
-        os.path.join(args.model_dir,'en_'+args.model.lower()+'.pt'))
-   
+            'loss' : mean_loss.item(), 
+            'acc' : mean_acc.item()},
+        os.path.join(args.model_dir,'word2vec_model.pt'))
+
         scheduler.step()
-        print('\nMean Loss : %.3f , Mean Acc : %.3f\n' %(loss_train, acc_train))
+        print('\nMean Loss : %.3f , Mean Acc : %.3f\n' %(mean_loss, mean_acc))
+
+    kor_weight = model.get_weight()
+    kor_weight = kor_weight.detach().cpu().numpy()
+    kor_weight[0] = 0.0
+
+    np.save(os.path.join(args.embedding_dir, 'kor_' + args.model.lower() + '.npy'), kor_weight)
 
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=777, help='random seed (default: 777)')
-    parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train (default: 50)')
-    parser.add_argument('--token_size', type=int, default=13000, help='number of bpe merge (default: 13000)')
+    parser.add_argument('--epochs', type=int, default=20, help='number of epochs to train (default: 20)')
+    parser.add_argument('--token_size', type=int, default=32000, help='number of bpe merge (default: 32000)')
     parser.add_argument('--model', type=str, default='CBOW', help='model of embedding (default: CBOW)')
     parser.add_argument('--embedding_size', type=int, default=512, help='embedding size of token (default: 512)')
     parser.add_argument('--window_size', type=int, default=13, help='window size (default: 13)')
-    parser.add_argument('--batch_size', type=int, default=512, help='input batch size for training (default: 512)')
+    parser.add_argument('--batch_size', type=int, default=128, help='input batch size for training (default: 128)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-4)')    
 
-    #parser.add_argument('--data_dir', type=str, default='../Data/korean_dialogue_translation.csv', help = 'text data')
+    parser.add_argument('--data_dir', type=str, default='./Data', help = 'data path')
     parser.add_argument('--token_dir', type=str, default='./Token' , help='token data dir path')
     parser.add_argument('--log_dir', type=str, default='./Log' , help='loggind data dir path')
     parser.add_argument('--embedding_dir', type=str, default='./Embedding' , help='embedding dir path')
