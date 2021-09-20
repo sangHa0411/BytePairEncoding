@@ -15,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from dataset import *
 from model import *
-from preprocessor import *
+from tokenizer import *
 
 def progressLearning(value, endvalue, loss, acc, bar_length=50):
     percent = float(value + 1) / endvalue
@@ -131,33 +131,21 @@ def train(args) :
         scheduler.step()
         print('\nMean Loss : %.3f , Mean Acc : %.3f\n' %(loss_train, acc_train))
 
-    kor_weight = model.get_weight()
-    kor_weight = kor_weight.detach().cpu().numpy()
-    kor_weight[0] = 0.0
-
-    kor_bias = model.get_bias()
-    kor_bias = kor_bias.detach().cpu().numpy()
-    kor_bias[0] = 0.0
-
-    np.save(os.path.join(args.embedding_dir, 'kor_weight.npy'), kor_weight)
-    np.save(os.path.join(args.embedding_dir, 'kor_bias.npy'), kor_bias)
-
 if __name__ == '__main__' :
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--seed', type=int, default=777, help='random seed (default: 777)')
-    parser.add_argument('--epochs', type=int, default=60, help='number of epochs to train (default: 35)')
-    parser.add_argument('--token_size', type=int, default=7000, help='number of bpe merge (default: 7000)')
+    parser.add_argument('--epochs', type=int, default=50, help='number of epochs to train (default: 50)')
+    parser.add_argument('--token_size', type=int, default=13000, help='number of bpe merge (default: 13000)')
     parser.add_argument('--model', type=str, default='CBOW', help='model of embedding (default: CBOW)')
     parser.add_argument('--embedding_size', type=int, default=512, help='embedding size of token (default: 512)')
-    parser.add_argument('--window_size', type=int, default=11, help='window size (default: 11)')
-    parser.add_argument('--batch_size', type=int, default=1024, help='input batch size for training (default: 1024)')
-    parser.add_argument('--val_batch_size', type=int, default=1024, help='input batch size for validing (default: 1024)')
+    parser.add_argument('--window_size', type=int, default=13, help='window size (default: 13)')
+    parser.add_argument('--batch_size', type=int, default=512, help='input batch size for training (default: 512)')
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate (default: 1e-4)')    
-    parser.add_argument('--val_ratio', type=float, default=0.1, help='ratio for validaton (default: 0.1)')
 
-    parser.add_argument('--data_dir', type=str, default='../Data/korean_dialogue_translation.csv', help = 'text data')
+    #parser.add_argument('--data_dir', type=str, default='../Data/korean_dialogue_translation.csv', help = 'text data')
     parser.add_argument('--token_dir', type=str, default='./Token' , help='token data dir path')
+    parser.add_argument('--log_dir', type=str, default='./Log' , help='loggind data dir path')
     parser.add_argument('--embedding_dir', type=str, default='./Embedding' , help='embedding dir path')
     parser.add_argument('--model_dir', type=str, default='./Model' , help='best model dir path')
 
