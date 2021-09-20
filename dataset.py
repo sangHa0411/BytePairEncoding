@@ -8,7 +8,6 @@ class NgramDataset :
         self.w_size = w_size
 
     def get_data(self, idx_data) :
-        co_occ = np.zeros((self.v_size, self.v_size))
         mid_point = int(self.w_size/2)
 
         ngram_data = []
