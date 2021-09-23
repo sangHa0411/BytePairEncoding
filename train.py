@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import random
 import argparse
@@ -15,18 +16,14 @@ from torch.utils.tensorboard import SummaryWriter
 
 from dataset import *
 from model import *
+from loader import *
 from tokenizer import *
 
 def progressLearning(value, endvalue, loss, acc, bar_length=50):
     percent = float(value + 1) / endvalue
     arrow = '-' * int(round(percent * bar_length)-1) + '>'
     spaces = ' ' * (bar_length - len(arrow))
-    sys.stdout.write("\rPercent: [{0}] {1}/{2} \t Loss : {3:.3f}, Acc : {4:.3f}".format(arrow + spaces, 
-        value+1, 
-        endvalue, 
-        loss, 
-        acc)
-    )
+    sys.stdout.write("\rPercent: [{0}] {1}/{2} \t Loss : {3:.3f}, Acc : {4:.3f}".format(arrow + spaces, value+1, endvalue, loss, acc))
     sys.stdout.flush()
 
 def seed_everything(seed):
@@ -38,6 +35,11 @@ def seed_everything(seed):
     np.random.seed(seed)
     random.seed(seed)
 
+def preprocess_kor(sen) :
+    sen = re.sub('[^가-힣0-9 ~\',.!?]' , '', sen)
+    sen = re.sub(' {2,}' , ' ' , sen)
+    return sen
+    
 def train(args) :
     # -- Seed
     seed_everything(args.seed)
@@ -70,7 +72,8 @@ def train(args) :
     word2vec_dset = Word2VecDataset(cen_data, con_data)
 
     # -- DataLoader
-    data_loader = DataLoader(word2vec_dset,
+    data_loader = DataLoader(
+        word2vec_dset,
         num_workers=multiprocessing.cpu_count()//2,
         shuffle=True,
         batch_size=args.batch_size
